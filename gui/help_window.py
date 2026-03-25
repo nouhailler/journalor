@@ -169,11 +169,24 @@ class HelpWindow(ctk.CTkToplevel):
     def __init__(self, master):
         super().__init__(master)
         self.title("Documentation — Journalor")
-        self.geometry("720x600")
-        self.minsize(600, 400)
         self.resizable(True, True)
+        self._body_labels: list = []
         self._build()
-        self.after(100, self.lift)
+        self.after(50, lambda: self.attributes("-zoomed", True))
+        self.after(150, self.lift)
+        self.bind("<Configure>", self._on_resize)
+
+    def _on_resize(self, event=None):
+        """Update wraplength of all body labels when window is resized."""
+        w = self.winfo_width()
+        if w < 200:
+            return
+        wrap = max(400, w - 160)
+        for lbl in self._body_labels:
+            try:
+                lbl.configure(wraplength=wrap)
+            except Exception:
+                pass
 
     def _build(self):
         self.grid_columnconfigure(0, weight=1)
@@ -228,15 +241,17 @@ class HelpWindow(ctk.CTkToplevel):
                         anchor="w",
                     ).grid(row=0, column=0, sticky="w")
 
-                    ctk.CTkLabel(
+                    body_lbl = ctk.CTkLabel(
                         item_frame,
                         text=body,
                         font=ctk.CTkFont(size=12),
                         text_color="#cccccc",
                         anchor="w",
-                        wraplength=620,
+                        wraplength=1200,
                         justify="left",
-                    ).grid(row=1, column=0, sticky="w", pady=(2, 0))
+                    )
+                    body_lbl.grid(row=1, column=0, sticky="w", pady=(2, 0))
+                    self._body_labels.append(body_lbl)
                     row += 1
 
         # Close button
