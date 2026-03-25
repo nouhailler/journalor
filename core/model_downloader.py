@@ -1,5 +1,6 @@
 """Gestion du cache et téléchargement des modèles Whisper / Distil-Whisper."""
 
+import time
 import threading
 import logging
 
@@ -14,14 +15,22 @@ FASTER_WHISPER_REPOS: dict[str, str] = {
     "large-v3": "Systran/faster-whisper-large-v3",
 }
 
-# ── État global — empêche les téléchargements simultanés du même modèle ───────
+# ── État global ───────────────────────────────────────────────────────────────
 _state_lock = threading.Lock()
 _active: dict[str, dict] = {}
-# Format : { model_name: { "done": Event, "error": str|None, "cancel": Event } }
 
 
 def get_repo_id(model_name: str) -> str:
     return FASTER_WHISPER_REPOS.get(model_name, model_name)
+
+
+def get_cache_path(model_name: str) -> str:
+    """Retourne le chemin du cache HuggingFace pour ce modèle."""
+    import os
+    repo_id  = get_repo_id(model_name)
+    cache    = os.environ.get("HF_HOME", os.path.expanduser("~/.cache/huggingface/hub"))
+    folder   = "models--" + repo_id.replace("/", "--")
+    return os.path.join(cache, folder)
 
 
 def is_model_cached(model_name: str) -> bool:
@@ -35,41 +44,37 @@ def is_model_cached(model_name: str) -> bool:
 
 
 def download_model(
-    model_name: str,
+    model_name:  str,
     on_progress: callable = None,
-    # signature : on_progress(file_idx, file_total, filename, file_bytes)
+    # signature : on_progress(file_idx, file_total, filename,
+    #                         bytes_done, bytes_total)
     on_done:     callable = None,
     on_error:    callable = None,
 ) -> threading.Event:
     """
-    Télécharge le modèle dans le cache HF fichier par fichier.
-    Retourne un threading.Event qu'on peut set() pour annuler entre deux fichiers.
-
-    Si un téléchargement est déjà en cours pour ce modèle, les callbacks
-    sont rattachés à celui-ci — aucun second thread n'est lancé.
+    Lance le téléchargement dans un thread.
+    Retourne un Event qu'on peut set() pour annuler entre deux fichiers.
+    Si un DL est déjà en cours, les callbacks sont rattachés à celui-ci.
     """
     with _state_lock:
         if model_name in _active:
             log.info("DL déjà en cours pour %s — rattachement", model_name)
-            cancel = _active[model_name]["cancel"]
-            # Lancer un thread d'attente léger
             threading.Thread(
                 target=_wait_for_existing,
                 args=(model_name, on_done, on_error),
                 daemon=True,
             ).start()
-            return cancel
+            return _active[model_name]["cancel"]
 
         cancel = threading.Event()
         state  = {"done": threading.Event(), "error": None, "cancel": cancel}
         _active[model_name] = state
 
-    t = threading.Thread(
+    threading.Thread(
         target=_run,
         args=(model_name, on_progress, on_done, on_error, state),
         daemon=True,
-    )
-    t.start()
+    ).start()
     return cancel
 
 
@@ -96,14 +101,14 @@ def _run(model_name, on_progress, on_done, on_error, state):
         repo_id = get_repo_id(model_name)
         log.info("Début téléchargement %s (%s)", model_name, repo_id)
 
-        # Récupère la liste des fichiers avec leurs tailles
-        api = HfApi()
+        # Liste des fichiers (sans .gitattributes)
+        api      = HfApi()
         siblings = api.model_info(repo_id).siblings or []
-        files = [
+        files    = [
             {"name": s.rfilename, "size": s.size or 0}
             for s in siblings
             if not s.rfilename.startswith(".")
-            and s.rfilename != ".gitattributes"
+            and s.rfilename not in (".gitattributes",)
         ]
         total = len(files)
 
@@ -116,16 +121,19 @@ def _run(model_name, on_progress, on_done, on_error, state):
                     on_error("Annulé par l'utilisateur")
                 return
 
+            log.info("  [%d/%d] %s (%s)", idx + 1, total,
+                     f["name"], fmt_bytes(f["size"]))
+
+            # Notification début de fichier
             if on_progress:
-                on_progress(idx, total, f["name"], f["size"])
+                on_progress(idx, total, f["name"], 0, f["size"])
 
-            log.info("  [%d/%d] %s (%s)", idx + 1, total, f["name"],
-                     _fmt(f["size"]))
-            hf_hub_download(repo_id=repo_id, filename=f["name"])
+            # Téléchargement avec progression octet par octet (throttlée)
+            _download_file(repo_id, f["name"], idx, total, on_progress, state)
 
+        # Terminé
         if on_progress:
-            on_progress(total, total, "", 0)
-
+            on_progress(total, total, "", 0, 0)
         log.info("Téléchargement terminé : %s", model_name)
         state["error"] = None
         state["done"].set()
@@ -138,17 +146,53 @@ def _run(model_name, on_progress, on_done, on_error, state):
         state["done"].set()
         if on_error:
             on_error(str(exc))
-
     finally:
         with _state_lock:
             _active.pop(model_name, None)
 
 
-def _fmt(n: int) -> str:
+def _download_file(repo_id, filename, idx, total, on_progress, state):
+    """
+    Télécharge un fichier unique avec un monkey-patch tqdm throttlé :
+    au maximum 2 appels on_progress par seconde pour ne pas saturer tkinter.
+    """
+    import tqdm.auto as _tqdm_mod
+    from huggingface_hub import hf_hub_download
+
+    original_tqdm = _tqdm_mod.tqdm
+    last_t        = [0.0]
+
+    cb = {"fn": on_progress}  # cellule mutable pour la closure
+
+    class _ThrottledTqdm(original_tqdm):
+        def update(self, n=1):
+            super().update(n)
+            fn = cb.get("fn")
+            if fn is None:
+                return
+            now = time.monotonic()
+            if now - last_t[0] >= 0.5:          # max 2 updates/sec
+                last_t[0] = now
+                b_done  = int(self.n)
+                b_total = int(self.total) if self.total else 0
+                try:
+                    fn(idx, total, filename, b_done, b_total)
+                except Exception:
+                    pass
+
+    _tqdm_mod.tqdm = _ThrottledTqdm
+    try:
+        hf_hub_download(repo_id=repo_id, filename=filename)
+    finally:
+        _tqdm_mod.tqdm = original_tqdm
+        cb["fn"] = None   # évite tout appel résiduel après restauration
+
+
+def fmt_bytes(n: int) -> str:
     if n >= 1_000_000_000:
         return f"{n/1e9:.1f} Go"
     if n >= 1_000_000:
         return f"{n/1e6:.0f} Mo"
     if n >= 1_000:
         return f"{n/1e3:.0f} Ko"
-    return f"{n} o"
+    return f"{n} o" if n else "?"
