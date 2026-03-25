@@ -18,7 +18,7 @@ from utils.constants import (
     WINDOW_MIN_W, WINDOW_MIN_H, WINDOW_DEFAULT_W, WINDOW_DEFAULT_H,
     APP_NAME,
 )
-from utils.formatters import format_date_display, today_str
+from utils.formatters import count_words, format_date_display, today_str, now_time_str
 
 
 # ── Panel names ────────────────────────────────────────────────────────────────
@@ -46,6 +46,10 @@ class MainWindow(ctk.CTk):
             language=self._settings.get("language", "fr"),
         )
         self._exporter = Exporter(db, enc)
+
+        # Background transcription state (None when idle)
+        self._bg_state: dict | None = None
+        self._bg_ticker_id: str | None = None
 
         self.title(APP_NAME)
         self.geometry(f"{WINDOW_DEFAULT_W}x{WINDOW_DEFAULT_H}")
@@ -77,11 +81,51 @@ class MainWindow(ctk.CTk):
 
         self._build_sidebar()
 
-        # Right content area
+        # Right content area — row 0: notification banner, row 1: panel content
         self._content = ctk.CTkFrame(self, fg_color="transparent")
         self._content.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
         self._content.grid_columnconfigure(0, weight=1)
-        self._content.grid_rowconfigure(0, weight=1)
+        self._content.grid_rowconfigure(0, weight=0)   # banner (hidden by default)
+        self._content.grid_rowconfigure(1, weight=1)   # main content
+
+        # Notification banner (shown when background transcription is running/done)
+        self._banner = ctk.CTkFrame(
+            self._content, fg_color="#0d1f0d", corner_radius=8, height=44
+        )
+        self._banner.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        self._banner.grid_columnconfigure(0, weight=1)
+        self._banner.grid_propagate(False)
+        self._banner.grid_remove()   # hidden initially
+
+        self._banner_label = ctk.CTkLabel(
+            self._banner,
+            text="",
+            font=ctk.CTkFont(size=12),
+            anchor="w",
+        )
+        self._banner_label.grid(row=0, column=0, padx=12, sticky="w")
+
+        self._banner_open_btn = ctk.CTkButton(
+            self._banner,
+            text="Ouvrir",
+            width=70, height=28,
+            fg_color=COLOR_ACCENT, hover_color="#c73652",
+            font=ctk.CTkFont(size=11),
+            command=self._open_bg_entry,
+        )
+        self._banner_open_btn.grid(row=0, column=1, padx=(4, 4))
+        self._banner_open_btn.grid_remove()
+
+        self._banner_close_btn = ctk.CTkButton(
+            self._banner,
+            text="✕",
+            width=28, height=28,
+            fg_color="transparent",
+            hover_color="#2a2a2a",
+            font=ctk.CTkFont(size=11),
+            command=self._hide_banner,
+        )
+        self._banner_close_btn.grid(row=0, column=2, padx=(0, 8))
 
         self._current_panel: ctk.CTkFrame | None = None
 
@@ -164,7 +208,7 @@ class MainWindow(ctk.CTk):
         self._clear_content()
         self._set_nav_active(PANEL_LIST)
         panel = ctk.CTkFrame(self._content, fg_color="transparent")
-        panel.grid(row=0, column=0, sticky="nsew")
+        panel.grid(row=1, column=0, sticky="nsew")
         panel.grid_columnconfigure(0, weight=1)
         panel.grid_rowconfigure(0, weight=1)
 
@@ -186,7 +230,7 @@ class MainWindow(ctk.CTk):
     def _start_recording(self):
         self._clear_content()
         panel = ctk.CTkFrame(self._content, fg_color="transparent")
-        panel.grid(row=0, column=0, sticky="nsew")
+        panel.grid(row=1, column=0, sticky="nsew")
         panel.grid_columnconfigure(0, weight=1)
         panel.grid_rowconfigure(0, weight=1)
 
@@ -222,9 +266,12 @@ class MainWindow(ctk.CTk):
     ):
         self._clear_content()
         panel = ctk.CTkFrame(self._content, fg_color="transparent")
-        panel.grid(row=0, column=0, sticky="nsew")
+        panel.grid(row=1, column=0, sticky="nsew")
         panel.grid_columnconfigure(0, weight=1)
         panel.grid_rowconfigure(0, weight=1)
+
+        # Only offer background mode for new transcriptions (no existing text)
+        bg_callback = self._on_transcription_bg_request if not existing_text else None
 
         EditorWidget(
             panel,
@@ -236,6 +283,7 @@ class MainWindow(ctk.CTk):
             settings=self._settings,
             on_save=self._on_entry_saved,
             on_cancel=self._show_list,
+            on_background=bg_callback,
             entry_id=entry_id,
             existing_text=existing_text,
             existing_title=existing_title,
@@ -249,6 +297,140 @@ class MainWindow(ctk.CTk):
         self._show_list()
         self.after(100, lambda: self._entry_list.refresh(select_id=entry_id))
 
+    # ── Background transcription ───────────────────────────────────────────────
+
+    def _on_transcription_bg_request(
+        self, *, root, audio_path, duration, title, emoji, tag_ids,
+        remaining, result_holder
+    ):
+        """Called by EditorWidget when user clicks 'Continue in background'."""
+        # Cancel any previous bg state
+        if self._bg_ticker_id:
+            try:
+                self.after_cancel(self._bg_ticker_id)
+            except Exception:
+                pass
+            self._bg_ticker_id = None
+
+        self._bg_state = {
+            "audio_path": audio_path,
+            "duration": duration,
+            "title": title,
+            "emoji": emoji,
+            "tag_ids": tag_ids,
+            "result_holder": result_holder,
+            "done_entry_id": None,
+        }
+        self._bg_remaining = max(0, remaining)
+
+        # Show banner
+        self._banner.grid()
+        self._banner_open_btn.grid_remove()
+        self._update_banner_text()
+        self._tick_banner()
+
+        # Poll for result
+        self.after(500, self._poll_bg_transcription)
+
+        # Navigate to list so user can browse
+        self._show_list()
+
+    def _update_banner_text(self):
+        secs = self._bg_remaining
+        if secs > 0:
+            mins, s = divmod(secs, 60)
+            if mins > 0:
+                countdown = f"~{mins}m{s:02d}s"
+            else:
+                countdown = f"~{secs}s"
+            self._banner_label.configure(
+                text=f"⏳  Transcription en arrière-plan… {countdown} restantes"
+            )
+        else:
+            self._banner_label.configure(
+                text="⏳  Transcription en cours… finalisation…"
+            )
+
+    def _tick_banner(self):
+        if self._bg_state is None or self._bg_state.get("done_entry_id") is not None:
+            self._bg_ticker_id = None
+            return
+        if self._bg_remaining > 0:
+            self._bg_remaining -= 1
+            self._update_banner_text()
+        self._bg_ticker_id = self.after(1000, self._tick_banner)
+
+    def _poll_bg_transcription(self):
+        if self._bg_state is None:
+            return
+        holder = self._bg_state["result_holder"]
+        if holder.get("done"):
+            self._on_bg_transcription_complete()
+        else:
+            self.after(500, self._poll_bg_transcription)
+
+    def _on_bg_transcription_complete(self):
+        state = self._bg_state
+        holder = state["result_holder"]
+
+        # Stop ticker
+        if self._bg_ticker_id:
+            try:
+                self.after_cancel(self._bg_ticker_id)
+            except Exception:
+                pass
+            self._bg_ticker_id = None
+
+        if holder.get("error"):
+            # Transcription failed
+            self._banner_label.configure(
+                text=f"❌  Transcription échouée : {holder['error']}"
+            )
+            return
+
+        text = holder.get("text", "")
+        wc = count_words(text)
+        encrypted = self.enc.encrypt(text) if text else b""
+
+        eid = self.db.add_entry(
+            date=today_str(),
+            time=now_time_str(),
+            content_encrypted=encrypted,
+            title=state["title"],
+            audio_path=str(state["audio_path"]) if state["audio_path"] else "",
+            duration=state["duration"],
+            word_count=wc,
+            emoji=state["emoji"],
+        )
+        self.db.set_entry_tags(eid, state["tag_ids"])
+
+        state["done_entry_id"] = eid
+        self._bg_remaining = 0
+
+        # Update banner to "done"
+        title_display = state["title"] or "Nouvelle entrée"
+        self._banner_label.configure(
+            text=f"✅  Transcription terminée — « {title_display[:40]} »"
+        )
+        self._banner_open_btn.grid()   # show "Ouvrir" button
+
+        # Refresh list if visible
+        if hasattr(self, "_entry_list"):
+            try:
+                self._entry_list.refresh(select_id=eid)
+            except Exception:
+                pass
+
+    def _open_bg_entry(self):
+        if self._bg_state and self._bg_state.get("done_entry_id"):
+            eid = self._bg_state["done_entry_id"]
+            self._hide_banner()
+            self._open_entry_detail(eid)
+
+    def _hide_banner(self):
+        self._bg_state = None
+        self._banner.grid_remove()
+
     # ── Detail view ────────────────────────────────────────────────────────────
 
     def _open_entry_detail(self, entry_id: int):
@@ -257,7 +439,7 @@ class MainWindow(ctk.CTk):
             return
         self._clear_content()
         panel = ctk.CTkFrame(self._content, fg_color="transparent")
-        panel.grid(row=0, column=0, sticky="nsew")
+        panel.grid(row=1, column=0, sticky="nsew")
         panel.grid_columnconfigure(0, weight=1)
         panel.grid_rowconfigure(1, weight=1)
 
@@ -399,7 +581,7 @@ class MainWindow(ctk.CTk):
         self._clear_content()
         self._set_nav_active(PANEL_STATS)
         panel = StatsView(self._content, self.db)
-        panel.grid(row=0, column=0, sticky="nsew")
+        panel.grid(row=1, column=0, sticky="nsew")
         self._current_panel = panel
 
     # ── Settings ──────────────────────────────────────────────────────────────
@@ -423,7 +605,6 @@ class MainWindow(ctk.CTk):
 
     def _open_export(self):
         from gui.export_window import ExportWindow
-        # Export all entries or selected
         if hasattr(self, "_entry_list") and self._entry_list.get_selected_id():
             ids = [self._entry_list.get_selected_id()]
         else:
@@ -445,7 +626,6 @@ class MainWindow(ctk.CTk):
 
     def _focus_search(self):
         self._show_list()
-        # Entry list will have a search box; give it focus
         if hasattr(self, "_entry_list"):
             for w in self._entry_list.winfo_children():
                 if isinstance(w, ctk.CTkFrame):
