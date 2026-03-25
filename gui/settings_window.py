@@ -25,8 +25,8 @@ class SettingsWindow(ctk.CTkToplevel):
         self.db = db
         self.enc = enc
         self.on_settings_changed = on_settings_changed
-        self.grab_set()
         self._build()
+        self.after(100, self.grab_set)
 
     # ── Layout principal ───────────────────────────────────────────────────────
 

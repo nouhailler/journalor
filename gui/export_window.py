@@ -16,8 +16,8 @@ class ExportWindow(ctk.CTkToplevel):
         self.resizable(False, False)
         self.exporter = exporter
         self.entry_ids = entry_ids
-        self.grab_set()
         self._build()
+        self.after(100, self.grab_set)
 
     def _build(self):
         self.grid_columnconfigure(0, weight=1)

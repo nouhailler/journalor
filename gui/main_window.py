@@ -362,7 +362,6 @@ class MainWindow(ctk.CTk):
         dialog.title("Confirmer la suppression")
         dialog.geometry("320x140")
         dialog.resizable(False, False)
-        dialog.grab_set()
 
         ctk.CTkLabel(
             dialog, text="Supprimer cette entrée ?",
@@ -385,6 +384,7 @@ class MainWindow(ctk.CTk):
             fg_color="#c0392b", hover_color="#e74c3c",
             command=lambda: self._confirm_delete(entry_id, dialog),
         ).pack(side="left", padx=8)
+        dialog.after(100, dialog.grab_set)
 
     def _confirm_delete(self, entry_id: int, dialog):
         self.db.delete_entry(entry_id)
