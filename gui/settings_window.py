@@ -20,8 +20,8 @@ class SettingsWindow(ctk.CTkToplevel):
                  log_path=None, on_settings_changed: callable = None):
         super().__init__(master)
         self.title("Paramètres — Journalor")
-        self.geometry("580x780")
-        self.resizable(False, True)
+        self.resizable(True, True)
+        self.after(50, lambda: self.attributes("-zoomed", True))
         self.db = db
         self.enc = enc
         self.log_path = log_path
