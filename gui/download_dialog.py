@@ -129,10 +129,11 @@ class DownloadDialog(ctk.CTkToplevel):
         card.grid_columnconfigure(0, weight=1)
 
         def lbl(parent, text, row, **kw):
+            pady = kw.pop("pady", 2)  # extraire pady AVANT de passer à CTkLabel
             ctk.CTkLabel(parent, text=text, anchor="w",
                          wraplength=470, justify="left", **kw
                          ).grid(row=row, column=0, sticky="w",
-                                padx=16, pady=kw.pop("pady", 2))
+                                padx=16, pady=pady)
 
         # Titre
         lbl(card,

@@ -8,12 +8,33 @@ import logging
 from pathlib import Path
 
 # ── Configure logging ──────────────────────────────────────────────────────────
+# Chemin du fichier log (résolu après get_data_dir, mais on prépare le handler)
+_LOG_FORMAT  = "%(asctime)s  %(levelname)-8s  %(name)s  %(message)s"
+_LOG_DATEFMT = "%Y-%m-%d %H:%M:%S"
+
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
-    datefmt="%H:%M:%S",
+    format=_LOG_FORMAT,
+    datefmt=_LOG_DATEFMT,
 )
 log = logging.getLogger("journalor")
+
+
+def setup_file_logging(data_dir: Path) -> Path:
+    """Ajoute un FileHandler rotatif vers journalor.log dans data_dir."""
+    from logging.handlers import RotatingFileHandler
+
+    log_path = data_dir / "journalor.log"
+    handler  = RotatingFileHandler(
+        log_path,
+        maxBytes=2 * 1024 * 1024,   # 2 Mo par fichier
+        backupCount=3,               # garder 3 anciens fichiers
+        encoding="utf-8",
+    )
+    handler.setFormatter(logging.Formatter(_LOG_FORMAT, _LOG_DATEFMT))
+    logging.getLogger().addHandler(handler)
+    log.info("Logs écrits dans : %s", log_path)
+    return log_path
 
 # ── Resolve data directory ─────────────────────────────────────────────────────
 def get_data_dir() -> Path:
@@ -40,6 +61,7 @@ def main():
     import customtkinter as ctk
 
     data_dir = get_data_dir()
+    log_path = setup_file_logging(data_dir)
     log.info("Data directory: %s", data_dir)
 
     # ── Database + encryption ──────────────────────────────────────────────────
@@ -69,7 +91,7 @@ def main():
         effective_dir.mkdir(parents=True, exist_ok=True)
 
         from gui.main_window import MainWindow
-        app = MainWindow(db=db, enc=enc, data_dir=effective_dir)
+        app = MainWindow(db=db, enc=enc, data_dir=effective_dir, log_path=log_path)
         app.mainloop()
 
     # ── Login screen ───────────────────────────────────────────────────────────

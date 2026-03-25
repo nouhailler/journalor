@@ -17,13 +17,14 @@ from utils.validators import validate_pin
 
 class SettingsWindow(ctk.CTkToplevel):
     def __init__(self, master, db: Database, enc: EncryptionManager,
-                 on_settings_changed: callable = None):
+                 log_path=None, on_settings_changed: callable = None):
         super().__init__(master)
         self.title("Paramètres — Journalor")
-        self.geometry("580x740")
+        self.geometry("580x780")
         self.resizable(False, True)
         self.db = db
         self.enc = enc
+        self.log_path = log_path
         self.on_settings_changed = on_settings_changed
         self._build()
         self.after(100, self.grab_set)
@@ -70,6 +71,10 @@ class SettingsWindow(ctk.CTkToplevel):
         # ── Sécurité ───────────────────────────────────────────────────────────
         self._section(scroll, "🔒  Sécurité — Changer le PIN", row=8)
         self._build_pin_fields(scroll, row=9)
+
+        # ── Diagnostics ────────────────────────────────────────────────────────
+        self._section(scroll, "🔍  Diagnostics", row=10)
+        self._build_diag_section(scroll, row=11)
 
         # ── Bouton sauvegarder ─────────────────────────────────────────────────
         ctk.CTkButton(
@@ -231,6 +236,84 @@ class SettingsWindow(ctk.CTkToplevel):
         )
         ctk.CTkButton(frame, text="…", width=36, command=self._browse_dir
                       ).grid(row=0, column=2)
+
+    def _build_diag_section(self, parent, row: int):
+        """Section diagnostics : ouvrir le log, afficher les dernières lignes."""
+        from pathlib import Path
+
+        frame = ctk.CTkFrame(parent, fg_color="transparent")
+        frame.grid(row=row, column=0, sticky="ew", pady=4)
+        frame.grid_columnconfigure(0, weight=1)
+
+        log_path = self.log_path
+
+        if log_path and Path(log_path).exists():
+            path_str = str(log_path)
+            ctk.CTkLabel(
+                frame,
+                text=f"Fichier de logs : {path_str}",
+                font=ctk.CTkFont(size=11), text_color=COLOR_TEXT_MUTED,
+                anchor="w", wraplength=520,
+            ).grid(row=0, column=0, sticky="w", pady=(0, 6))
+
+            btns = ctk.CTkFrame(frame, fg_color="transparent")
+            btns.grid(row=1, column=0, sticky="w")
+
+            ctk.CTkButton(
+                btns, text="📄  Ouvrir dans l'éditeur",
+                height=34, width=190,
+                command=lambda: self._open_log(path_str),
+            ).pack(side="left", padx=(0, 8))
+
+            ctk.CTkButton(
+                btns, text="👁  Voir les 50 dernières lignes",
+                height=34, width=220,
+                fg_color="#1a1a3e", hover_color="#2a2a5e",
+                command=lambda: self._show_log_tail(path_str),
+            ).pack(side="left")
+        else:
+            ctk.CTkLabel(
+                frame,
+                text="Le fichier de logs sera créé au prochain lancement.",
+                font=ctk.CTkFont(size=11), text_color=COLOR_TEXT_MUTED,
+                anchor="w",
+            ).grid(row=0, column=0, sticky="w")
+
+    def _open_log(self, path_str: str):
+        """Ouvre le fichier log dans l'éditeur par défaut du système."""
+        import subprocess
+        try:
+            subprocess.Popen(["xdg-open", path_str])
+        except Exception as e:
+            self._show_log_tail(path_str)
+
+    def _show_log_tail(self, path_str: str):
+        """Affiche les 50 dernières lignes du log dans une fenêtre."""
+        from pathlib import Path
+        try:
+            lines = Path(path_str).read_text(encoding="utf-8", errors="replace").splitlines()
+            tail  = "\n".join(lines[-50:])
+        except Exception as e:
+            tail = f"Impossible de lire le fichier : {e}"
+
+        win = ctk.CTkToplevel(self)
+        win.title("Dernières lignes du log")
+        win.geometry("700x460")
+        win.resizable(True, True)
+        win.grid_rowconfigure(0, weight=1)
+        win.grid_columnconfigure(0, weight=1)
+
+        box = ctk.CTkTextbox(win, font=ctk.CTkFont(family="monospace", size=11))
+        box.grid(row=0, column=0, sticky="nsew", padx=12, pady=(12, 4))
+        box.insert("1.0", tail)
+        box.configure(state="disabled")
+        box.see("end")
+
+        ctk.CTkButton(
+            win, text="Fermer", width=100, height=32,
+            command=win.destroy,
+        ).grid(row=1, column=0, pady=(4, 12))
+        win.after(100, win.grab_set)
 
     def _browse_dir(self):
         from tkinter import filedialog

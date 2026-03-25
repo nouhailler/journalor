@@ -30,11 +30,13 @@ PANEL_DETAIL  = "detail"
 
 
 class MainWindow(ctk.CTk):
-    def __init__(self, db: Database, enc: EncryptionManager, data_dir: Path):
+    def __init__(self, db: Database, enc: EncryptionManager, data_dir: Path,
+                 log_path: Path = None):
         super().__init__()
         self.db = db
         self.enc = enc
         self.data_dir = data_dir
+        self.log_path = log_path
         self.audio_dir = data_dir / "audio"
         self.audio_dir.mkdir(parents=True, exist_ok=True)
 
@@ -406,6 +408,7 @@ class MainWindow(ctk.CTk):
         from gui.settings_window import SettingsWindow
         SettingsWindow(
             self, self.db, self.enc,
+            log_path=self.log_path,
             on_settings_changed=self._reload_settings,
         )
 
