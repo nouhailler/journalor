@@ -54,6 +54,7 @@ class MainWindow(ctk.CTk):
         self.title(APP_NAME)
         self.geometry(f"{WINDOW_DEFAULT_W}x{WINDOW_DEFAULT_H}")
         self.minsize(WINDOW_MIN_W, WINDOW_MIN_H)
+        self.after(10, lambda: self.attributes("-zoomed", True))
 
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
