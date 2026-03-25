@@ -78,7 +78,7 @@ def main():
     # ── Root window (holds login + main) ──────────────────────────────────────
     root = ctk.CTk()
     root.title("Journalor")
-    root.geometry("460x560")
+    root.geometry("560x660")
     root.resizable(False, False)
 
     def launch_main(password: str):

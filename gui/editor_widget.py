@@ -341,9 +341,16 @@ class EditorWidget(ctk.CTkFrame):
         )
 
     def _on_progress(self, ratio: float):
+        if self._bg_mode:
+            return
+        def _do(r=ratio):
+            try:
+                if self.winfo_exists():
+                    self._progress_bar.set(r)
+            except Exception:
+                pass
         try:
-            if not self._bg_mode:
-                self.after(0, lambda: self._progress_bar.set(ratio))
+            self.after(0, _do)
         except Exception:
             pass
 
