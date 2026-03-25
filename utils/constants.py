@@ -1,7 +1,7 @@
 """Shared constants for the Journalor application."""
 
 APP_NAME = "Journalor"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.5.0"
 
 # Audio settings
 SAMPLE_RATE = 16000

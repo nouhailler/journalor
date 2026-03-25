@@ -34,3 +34,6 @@ config.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Packaging Debian (répertoires de build ; le .deb est attaché comme release asset)
+packaging/journalor_*/
