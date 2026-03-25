@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Environnement virtuel
+venv/
+.venv/
+env/
+
+# Données utilisateur (journal, audio, backups)
+data/
+journalor_data/
+*.db
+*.wav
+
+# Config locale (contient le chemin data_dir de l'utilisateur)
+config.json
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

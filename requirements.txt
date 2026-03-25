@@ -1,0 +1,9 @@
+sounddevice
+numpy
+scipy
+customtkinter
+faster-whisper
+cryptography
+matplotlib
+fpdf2
+plyer
