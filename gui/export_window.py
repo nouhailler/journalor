@@ -12,12 +12,14 @@ class ExportWindow(ctk.CTkToplevel):
     def __init__(self, master, exporter: Exporter, entry_ids: list[int]):
         super().__init__(master)
         self.title("Exporter")
-        self.geometry("400x300")
-        self.resizable(False, False)
+        self.geometry("480x360")
+        self.minsize(420, 320)
+        self.resizable(True, False)
         self.exporter = exporter
         self.entry_ids = entry_ids
         self._build()
         self.after(100, self.grab_set)
+        self.after(150, self.lift)
 
     def _build(self):
         self.grid_columnconfigure(0, weight=1)
@@ -53,11 +55,14 @@ class ExportWindow(ctk.CTkToplevel):
         ext = ext_map[fmt]
         default_name = f"journal_export{ext}"
 
+        self.attributes("-topmost", True)
         path = filedialog.asksaveasfilename(
+            parent=self,
             defaultextension=ext,
             initialfile=default_name,
             filetypes=[(f"Fichier {ext}", f"*{ext}"), ("Tous", "*.*")],
         )
+        self.attributes("-topmost", False)
         if not path:
             return
 

@@ -5,6 +5,7 @@ import time
 import tkinter as tk
 import customtkinter as ctk
 from pathlib import Path
+import logging
 
 from core.audio_recorder import AudioRecorder
 from utils.constants import (
@@ -193,18 +194,77 @@ class RecorderWidget(ctk.CTkFrame):
             self._recorder.on_auto_stop = None
         if self._recorder and self._recorder.is_recording:
             self._audio_path = self._recorder.stop()
-        duration = self._recorder.get_duration() if self._recorder else 0
+        self._duration = self._recorder.get_duration() if self._recorder else 0
         self._meter.set_level(0)
+
+        if not (self._audio_path and self._audio_path.exists()):
+            self.on_cancel()
+            return
+
+        # Disable controls and show post-recording panel
         self._status_label.configure(
-            text="✓ Enregistrement terminé", text_color=COLOR_SUCCESS
+            text=f"✓ Enregistrement terminé — {format_duration(self._duration)}",
+            text_color=COLOR_SUCCESS,
         )
         self._pause_btn.configure(state="disabled")
         self._stop_btn.configure(state="disabled")
+        self._cancel_btn.configure(state="disabled")
+        self._show_post_recording()
 
-        if self._audio_path and self._audio_path.exists():
-            self.on_done(self._audio_path, duration)
+    def _show_post_recording(self):
+        """Show MP3 checkbox + continue button after recording."""
+        post = ctk.CTkFrame(self, fg_color="transparent")
+        post.grid(row=6, column=0, pady=(16, 0))
+
+        self._mp3_var = tk.BooleanVar(value=False)
+        ctk.CTkCheckBox(
+            post,
+            text="Conserver une copie audio (.mp3)",
+            variable=self._mp3_var,
+            font=ctk.CTkFont(size=12),
+        ).grid(row=0, column=0, padx=(0, 16), sticky="w")
+
+        self._mp3_hint = ctk.CTkLabel(
+            post,
+            text="Compresse l'enregistrement WAV en MP3 (128 kbps).",
+            font=ctk.CTkFont(size=10),
+            text_color=COLOR_TEXT_MUTED,
+        )
+        self._mp3_hint.grid(row=1, column=0, sticky="w", pady=(2, 10))
+
+        self._continue_btn = ctk.CTkButton(
+            post,
+            text="Continuer  →",
+            fg_color=COLOR_SUCCESS, hover_color="#27ae60",
+            width=150, height=40,
+            font=ctk.CTkFont(size=13, weight="bold"),
+            command=self._on_continue,
+        )
+        self._continue_btn.grid(row=2, column=0, sticky="w")
+
+        self._mp3_status = ctk.CTkLabel(
+            post, text="",
+            font=ctk.CTkFont(size=11), text_color=COLOR_TEXT_MUTED,
+        )
+        self._mp3_status.grid(row=3, column=0, sticky="w", pady=(6, 0))
+
+    def _on_continue(self):
+        self._continue_btn.configure(state="disabled", text="…")
+        if self._mp3_var.get():
+            self._mp3_status.configure(text="Conversion MP3 en cours…")
+            threading.Thread(target=self._convert_and_done, daemon=True).start()
         else:
-            self.on_cancel()
+            self.on_done(self._audio_path, self._duration)
+
+    def _convert_and_done(self):
+        from utils.audio_utils import wav_to_mp3
+        try:
+            mp3_path = wav_to_mp3(self._audio_path)
+            self._audio_path.unlink(missing_ok=True)
+            self.after(0, lambda: self.on_done(mp3_path, self._duration))
+        except Exception as exc:
+            logging.warning("MP3 conversion failed: %s", exc)
+            self.after(0, lambda: self.on_done(self._audio_path, self._duration))
 
     def _cancel(self):
         self._timer_running = False

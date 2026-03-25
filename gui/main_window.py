@@ -171,10 +171,11 @@ class MainWindow(ctk.CTk):
             row=8, column=0, sticky="ew", padx=16, pady=8
         )
 
-        # Settings + export at bottom
+        # Settings, export, doc at bottom
         for i, (label, cmd) in enumerate([
             ("⚙️  Paramètres", self._open_settings),
             ("📤  Exporter", self._open_export),
+            ("📖  Documentation", self._open_help),
         ]):
             ctk.CTkButton(
                 s, text=label, anchor="w",
@@ -613,6 +614,12 @@ class MainWindow(ctk.CTk):
         if not ids:
             return
         ExportWindow(self, self._exporter, ids)
+
+    # ── Help ───────────────────────────────────────────────────────────────────
+
+    def _open_help(self):
+        from gui.help_window import HelpWindow
+        HelpWindow(self)
 
     # ── Keyboard shortcuts ─────────────────────────────────────────────────────
 

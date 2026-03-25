@@ -7,3 +7,4 @@ cryptography
 matplotlib
 fpdf2
 plyer
+lameenc
