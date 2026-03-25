@@ -209,6 +209,34 @@ class EditorWidget(ctk.CTkFrame):
             self._emoji_var.set(emoji)
 
     def _start_transcription(self):
+        from gui.download_dialog import DownloadDialog
+        from core.model_downloader import is_model_cached
+
+        model_name = self.transcriber.model_name
+
+        if is_model_cached(model_name):
+            # Modèle déjà en cache → transcription directe
+            self._run_transcription()
+        else:
+            # Modèle absent → on cache le panneau de progression jusqu'à la fin du DL
+            self._progress_frame.grid_remove()
+            self._progress_bar.stop()
+            DownloadDialog(
+                self.winfo_toplevel(),
+                model_name=model_name,
+                on_ready=self._on_model_ready,
+                on_cancel=self.on_cancel,
+            )
+
+    def _on_model_ready(self):
+        """Appelé par DownloadDialog quand le modèle est disponible."""
+        self._progress_label.configure(text="Transcription en cours…")
+        self._progress_bar.configure(mode="indeterminate")
+        self._progress_bar.start()
+        self._progress_frame.grid()
+        self._run_transcription()
+
+    def _run_transcription(self):
         self.transcriber.transcribe(
             self.audio_path,
             on_progress=self._on_progress,
