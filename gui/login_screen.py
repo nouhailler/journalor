@@ -30,10 +30,10 @@ class LoginScreen(ctk.CTkFrame):
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
-        card = ctk.CTkFrame(self, width=480, corner_radius=16)
+        card = ctk.CTkFrame(self, width=560, corner_radius=16)
         card.grid(row=0, column=0)
         card.grid_propagate(False)
-        card.configure(height=540)
+        card.configure(height=620)
 
         # App title
         ctk.CTkLabel(

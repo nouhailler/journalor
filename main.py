@@ -78,8 +78,8 @@ def main():
     # ── Root window (holds login + main) ──────────────────────────────────────
     root = ctk.CTk()
     root.title("Journalor")
-    root.geometry("560x660")
-    root.resizable(False, False)
+    root.geometry("700x800")
+    root.resizable(True, True)
 
     def launch_main(password: str):
         """Called after successful login."""
